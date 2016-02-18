@@ -44,12 +44,12 @@ critic_error_code (int code, char *function)
 	fprintf (stderr, "libspectre: error in %s found. Message see below.\n", function);
 	if (code <= -100) {
 		switch (code) {
-			case e_Fatal:
+			case gs_error_Fatal:
 				fprintf (stderr, "fatal internal error %d", code);
 				return TRUE;
 				break;
 
-			case e_ExecStackUnderflow:
+			case gs_error_ExecStackUnderflow:
 				fprintf (stderr, "stack overflow %d", code);
 				return TRUE;
 				break;
@@ -110,9 +110,9 @@ spectre_gs_process (SpectreGS  *gs,
 		set = _spectre_strdup_printf ("%d %d translate\n", -x, -y);
 		error = gsapi_run_string_continue (ghostscript_instance, set, strlen (set),
 						   0, &exit_code);
-		error = error == e_NeedInput ? 0 : error;
+		error = error == gs_error_NeedInput ? 0 : error;
 		free (set);
-		if (error != e_NeedInput && critic_error_code (error, "spectre_gs_process 2")) {
+		if (error != gs_error_NeedInput && critic_error_code (error, "spectre_gs_process 2")) {
 			fclose (fd);
 			return FALSE;
 		}
@@ -127,7 +127,7 @@ spectre_gs_process (SpectreGS  *gs,
 		read = fread (buf, sizeof (char), to_read, fd);
 		error = gsapi_run_string_continue (ghostscript_instance,
 						   buf, read, 0, &exit_code);
-		error = error == e_NeedInput ? 0 : error;
+		error = error == gs_error_NeedInput ? 0 : error;
 		left -= read;
 	}
 	
