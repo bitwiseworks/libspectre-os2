@@ -36,11 +36,12 @@ struct SpectreGS {
 };
 
 static int
-critic_error_code (int code)
+critic_error_code (int code, char *function)
 {
 	if (code >= 0)
 		return FALSE;
 	
+	fprintf (stderr, "libspectre: error in %s found. Message see below.\n", function);
 	if (code <= -100) {
 		switch (code) {
 			case e_Fatal:
@@ -98,7 +99,7 @@ spectre_gs_process (SpectreGS  *gs,
 	fseek (fd, begin, SEEK_SET);
 
 	error = gsapi_run_string_begin (ghostscript_instance, 0, &exit_code);
-	if (critic_error_code (error)) {
+	if (critic_error_code (error, "spectre_gs_process 1")) {
 		fclose (fd);
 		return FALSE;
 	}
@@ -111,13 +112,13 @@ spectre_gs_process (SpectreGS  *gs,
 						   0, &exit_code);
 		error = error == e_NeedInput ? 0 : error;
 		free (set);
-		if (error != e_NeedInput && critic_error_code (error)) {
+		if (error != e_NeedInput && critic_error_code (error, "spectre_gs_process 2")) {
 			fclose (fd);
 			return FALSE;
 		}
 	}
 
-	while (left > 0 && !critic_error_code (error)) {
+	while (left > 0 && !critic_error_code (error, "spectre_gs_process 3")) {
 		size_t to_read = BUFFER_SIZE;
 		
 		if (left < to_read)
@@ -131,11 +132,11 @@ spectre_gs_process (SpectreGS  *gs,
 	}
 	
 	fclose (fd);
-	if (critic_error_code (error))
+	if (critic_error_code (error, "spectre_gs_process 4"))
 		return FALSE;
 	
 	error = gsapi_run_string_end (ghostscript_instance, 0, &exit_code);
-	if (critic_error_code (error))
+	if (critic_error_code (error, "spectre_gs_process 5"))
 		return FALSE;
 
 	return TRUE;
@@ -158,7 +159,7 @@ spectre_gs_create_instance (SpectreGS *gs,
 	int error;
 	
 	error = gsapi_new_instance (&gs->ghostscript_instance, caller_handle);
-	if (!critic_error_code (error)) {
+	if (!critic_error_code (error, "spectre_gs_create_instance")) {
 		gsapi_set_stdio (gs->ghostscript_instance,
 				 NULL,
 				 spectre_gs_stdout,
@@ -177,7 +178,7 @@ spectre_gs_set_display_callback (SpectreGS *gs,
 	
 	error = gsapi_set_display_callback (gs->ghostscript_instance,
 					    callback);
-	return !critic_error_code (error);
+	return !critic_error_code (error, "spectre_gs_set_display");
 }
 
 int
@@ -189,7 +190,7 @@ spectre_gs_run (SpectreGS *gs,
 	
 	error = gsapi_init_with_args (gs->ghostscript_instance, n_args, args);
 
-	return !critic_error_code (error);
+	return !critic_error_code (error, "spectre_gs_run");
 }
 
 int
@@ -202,7 +203,7 @@ spectre_gs_send_string (SpectreGS  *gs,
 	error = gsapi_run_string_with_length (gs->ghostscript_instance,
 					      str, strlen (str), 0, &exit_code);
 
-	return !critic_error_code (error);
+	return !critic_error_code (error, "spectre_gs_send_string");
 }
 
 int
