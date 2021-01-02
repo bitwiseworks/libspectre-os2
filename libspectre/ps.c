@@ -368,10 +368,9 @@ static Boolean scan_boundingbox(int *bb, const char *line)
 /*###########################################################*/
 
 struct document *
-psscan(const char *filename, int scanstyle)
+psscan(FILE *file, const char *filename, int scanstyle)
 {
     struct document *doc;
-    FILE *file;
     int bb_set = NONE;
     int pages_set = NONE;
     int page_order_set = NONE;
@@ -424,11 +423,6 @@ psscan(const char *filename, int scanstyle)
       return(NULL);
     }
 
-    file = fopen (filename, "rb");
-    if (!file) {
-	    return NULL;
-    }
-
     fd = ps_io_init(file);
     
     /* rjl: check for DOS EPS files and almost DSC files that start with ^D */
@@ -437,7 +431,6 @@ psscan(const char *filename, int scanstyle)
 	fprintf(stderr, "Warning: empty file.\n");
         ENDMESSAGE(psscan)
         ps_io_exit(fd);
-	fclose (file);
 	return(NULL);
     }
 
@@ -451,10 +444,13 @@ psscan(const char *filename, int scanstyle)
 	    fprintf(stderr, "psscan error: input files seems to be a PJL file.\n");
 	    ENDMESSAGE(psscan)
 	    ps_io_exit(fd);
-	    fclose (file);
 	    return (NULL);
 	}
     }
+
+    // Initialize text so that all the strcmp we do after sscanf don't
+    // end up reading uninitialized memory if the sscanf fails
+    text[0] = '\0';
 
     /* Header comments */
     
@@ -593,19 +589,22 @@ psscan(const char *filename, int scanstyle)
 				doc->pageorder = ASCEND;
 			    }
 			}
+			// fall-through
 		    case 1:
 			if (maxpages > 0) {
+			    PS_free(doc->pages);
 			    doc->pages = (struct page *) PS_calloc(maxpages,
 							   sizeof(struct page));
-                            if (!doc->pages)
-                                maxpages = 0;
-                            CHECK_MALLOCED(doc->pages);
+			    if (!doc->pages)
+			        maxpages = 0;
+			    CHECK_MALLOCED(doc->pages);
 			}
 		}
 	    }
 	} else if (doc->nummedia == NONE &&
 		   iscomment(line+2, "DocumentMedia:")) {
 	    char w[21], h[21];
+	    PS_free(doc->media);
 	    doc->media = (Media) PS_calloc(1, sizeof (MediaStruct));
             CHECK_MALLOCED(doc->media);
 	    doc->media[0].name = ps_gettext(line+length("%%DocumentMedia:"),
@@ -652,6 +651,7 @@ psscan(const char *filename, int scanstyle)
 	} else if (doc->nummedia == NONE &&
 		   iscomment(line+2, "DocumentPaperSizes:")) {
 
+	    PS_free(doc->media);
 	    doc->media = (Media) PS_calloc(1, sizeof (MediaStruct));
             CHECK_MALLOCED(doc->media);
 	    doc->media[0].name = ps_gettext(line+length("%%DocumentPaperSizes:"),
@@ -814,14 +814,16 @@ psscan(const char *filename, int scanstyle)
 	    } else if (page_media_set == NONE &&
 		       iscomment(line+2, "PageMedia:")) {
 		cp = ps_gettext(line+length("%%PageMedia:"), NULL);
-		for (dmp = doc->media, i=0; i<doc->nummedia; i++, dmp++) {
-		    if (strcmp(cp, dmp->name) == 0) {
-			doc->default_page_media = dmp;
-			page_media_set = 1;
-			break;
+		if (cp) {
+		    for (dmp = doc->media, i=0; i<doc->nummedia; i++, dmp++) {
+			if (strcmp(cp, dmp->name) == 0) {
+			    doc->default_page_media = dmp;
+			    page_media_set = 1;
+			    break;
+			}
 		    }
+		    PS_free(cp);
 		}
-		PS_free(cp);
 	    } else if (page_bb_set == NONE &&
 		       iscomment(line+2, "PageBoundingBox:")) {
 		if (scan_boundingbox(doc->default_page_boundingbox,
@@ -937,7 +939,7 @@ psscan(const char *filename, int scanstyle)
 		     * name.  Case insensitive compares are only used for
 		     * PaperSize comments.
 		     */
-		    if (_spectre_strcasecmp(cp, dmp->name) == 0) {
+		    if (cp && _spectre_strcasecmp(cp, dmp->name) == 0) {
 			doc->default_page_media = dmp;
 			page_media_set = 1;
 			break;
@@ -1006,6 +1008,7 @@ psscan(const char *filename, int scanstyle)
 
     if (maxpages == 0) {
 	maxpages = 1;
+	PS_free(doc->pages);
 	doc->pages = (struct page *) PS_calloc(maxpages, sizeof(struct page));
 	CHECK_MALLOCED(doc->pages);
     }
@@ -1051,21 +1054,23 @@ continuepage:
 		/* Do nothing */
 	    } else if (doc->pages[doc->numpages].orientation == NONE &&
 		iscomment(line+2, "PageOrientation:")) {
-		sscanf(line+length("%%PageOrientation:"), "%256s", text);
-		if (strcmp(text, "Portrait") == 0) {
-		    doc->pages[doc->numpages].orientation = PORTRAIT;
-		} else if (strcmp(text, "Landscape") == 0) {
-		    doc->pages[doc->numpages].orientation = LANDSCAPE;
-		} else if (strcmp(text, "Seascape") == 0) {
-		    doc->pages[doc->numpages].orientation = SEASCAPE;
-		} else if (strcmp(text, "UpsideDown") == 0) {
-		    doc->pages[doc->numpages].orientation = UPSIDEDOWN;
+		const int res = sscanf(line+length("%%PageOrientation:"), "%256s", text);
+		if (res != EOF) {
+		    if (strcmp(text, "Portrait") == 0) {
+			doc->pages[doc->numpages].orientation = PORTRAIT;
+		    } else if (strcmp(text, "Landscape") == 0) {
+			doc->pages[doc->numpages].orientation = LANDSCAPE;
+		    } else if (strcmp(text, "Seascape") == 0) {
+			doc->pages[doc->numpages].orientation = SEASCAPE;
+		    } else if (strcmp(text, "UpsideDown") == 0) {
+			doc->pages[doc->numpages].orientation = UPSIDEDOWN;
+		    }
 		}
 	    } else if (doc->pages[doc->numpages].media == NULL &&
 		       iscomment(line+2, "PageMedia:")) {
 		cp = ps_gettext(line+length("%%PageMedia:"), NULL);
 		for (dmp = doc->media, i=0; i<doc->nummedia; i++, dmp++) {
-		    if (strcmp(cp, dmp->name) == 0) {
+		    if (cp && strcmp(cp, dmp->name) == 0) {
 			doc->pages[doc->numpages].media = dmp;
 			break;
 		    }
@@ -1079,7 +1084,7 @@ continuepage:
 		     * name.  Case insensitive compares are only used for
 		     * PaperSize comments.
 		     */
-		    if (_spectre_strcasecmp(cp, dmp->name) == 0) {
+		    if (cp && _spectre_strcasecmp(cp, dmp->name) == 0) {
 			doc->pages[doc->numpages].media = dmp;
 			break;
 		    }
@@ -1087,8 +1092,8 @@ continuepage:
 		PS_free(cp);
 	    } else if ((page_bb_set == NONE || page_bb_set == ATEND) &&
 		       iscomment(line+2, "PageBoundingBox:")) {
-		sscanf(line+length("%%PageBoundingBox:"), "%256s", text);
-		if (strcmp(text, "(atend)") == 0 || strcmp(text, "atend") == 0) {
+		const int res = sscanf(line+length("%%PageBoundingBox:"), "%256s", text);
+		if ((res != EOF) && (strcmp(text, "(atend)") == 0 || strcmp(text, "atend") == 0)) {
 		    page_bb_set = ATEND;
 		} else {
 		    if (scan_boundingbox(doc->pages[doc->numpages].boundingbox,
@@ -1233,7 +1238,6 @@ continuepage:
 #endif
     ENDMESSAGE(psscan)
     ps_io_exit(fd);
-    fclose (file);
     return doc;
 }
 
@@ -1865,13 +1869,7 @@ static char * readline (fd, enddoseps, lineP, positionP, line_lenP)
 */
 /*----------------------------------------------------------*/
 
-static char * readlineuntil (fd, enddoseps, lineP, positionP, line_lenP, charP)
-   FileData fd;
-   long enddoseps;
-   char **lineP;
-   long *positionP;
-   unsigned int *line_lenP;
-   char charP;
+static char * readlineuntil (FileData fd, long enddoseps, char **lineP, long *positionP, unsigned int *line_lenP, char charP)
 {
    char *line;
 
@@ -2207,13 +2205,34 @@ reorder_dword(val)
 
 /* change byte order if architecture is big-endian */
 static PS_WORD
-reorder_word(val)
-    PS_WORD val;
+reorder_word(PS_WORD val)
 {
     if (*((char *)(&dsc_arch)))
         return val;	/* little endian machine */
     else
 	return (PS_WORD) ((PS_WORD)(val&0xff) << 8) | (PS_WORD)((val&0xff00) >> 8);
+}
+
+static void
+ps_read_doseps_dword(FileData fd, PS_DWORD *dword)
+{
+    const size_t read = fread(dword, 4, 1, FD_FILE);
+    if (read == 4) {
+        *dword = (unsigned long)reorder_dword(*dword);
+    } else {
+        *dword = 0;
+    }
+}
+
+static void
+ps_read_doseps_word(FileData fd, PS_WORD *word)
+{
+    const size_t read = fread(word, 2, 1, FD_FILE);
+    if (read == 2) {
+        *word = (unsigned short)reorder_word(*word);
+    } else {
+        *word = 0;
+    }
 }
 
 /* DOS EPS header reading */
@@ -2222,27 +2241,21 @@ ps_read_doseps(fd,doseps)
     FileData fd;
     DOSEPS *doseps;
 {
-    fread(doseps->id, 1, 4, FD_FILE);
-    if (! ((doseps->id[0]==0xc5) && (doseps->id[1]==0xd0) 
+    const size_t read = fread(doseps->id, 1, 4, FD_FILE);
+    if (! ((read == 4) && (doseps->id[0]==0xc5) && (doseps->id[1]==0xd0)
 	   && (doseps->id[2]==0xd3) && (doseps->id[3]==0xc6)) ) {
         /* id is "EPSF" with bit 7 set */
         ps_io_rewind(fd);
 	return 0; 	/* OK */
     }
-    fread(&doseps->ps_begin,    4, 1, FD_FILE);	/* PS offset */
-    doseps->ps_begin = (unsigned long)reorder_dword(doseps->ps_begin);
-    fread(&doseps->ps_length,   4, 1, FD_FILE);	/* PS length */
-    doseps->ps_length = (unsigned long)reorder_dword(doseps->ps_length);
-    fread(&doseps->mf_begin,    4, 1, FD_FILE);	/* Metafile offset */
-    doseps->mf_begin = (unsigned long)reorder_dword(doseps->mf_begin);
-    fread(&doseps->mf_length,   4, 1, FD_FILE);	/* Metafile length */
-    doseps->mf_length = (unsigned long)reorder_dword(doseps->mf_length);
-    fread(&doseps->tiff_begin,  4, 1, FD_FILE);	/* TIFF offset */
-    doseps->tiff_begin = (unsigned long)reorder_dword(doseps->tiff_begin);
-    fread(&doseps->tiff_length, 4, 1, FD_FILE);	/* TIFF length */
-    doseps->tiff_length = (unsigned long)reorder_dword(doseps->tiff_length);
-    fread(&doseps->checksum,    2, 1, FD_FILE);
-    doseps->checksum = (unsigned short)reorder_word(doseps->checksum);
+    ps_read_doseps_dword(fd, &doseps->ps_begin); /* PS offset */
+    ps_read_doseps_dword(fd, &doseps->ps_length); /* PS length */
+    ps_read_doseps_dword(fd, &doseps->mf_begin); /* Metafile offset */
+    ps_read_doseps_dword(fd, &doseps->mf_length); /* Metafile length */
+    ps_read_doseps_dword(fd, &doseps->tiff_begin); /* TIFF offset */
+    ps_read_doseps_dword(fd, &doseps->tiff_length); /* TIFF length */
+    ps_read_doseps_word(fd, &doseps->checksum);
+
     ps_io_fseek(fd, doseps->ps_begin);	        /* seek to PS section */
 
     return doseps->ps_begin + doseps->ps_length;

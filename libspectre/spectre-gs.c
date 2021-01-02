@@ -29,16 +29,10 @@
 #include <ghostscript/iapi.h>
 #include <ghostscript/ierrors.h>
 
-/* e_ macros have been removed from Ghostscript in 9.18. */
-#ifndef e_Fatal
-#define e_Fatal gs_error_Fatal
-#endif
-#ifndef e_NeedInput
-#define e_NeedInput gs_error_NeedInput
-#endif
-#ifndef e_ExecStackUnderflow
-#define e_ExecStackUnderflow gs_error_ExecStackUnderflow
-#endif
+/* Ghostscript before version 9.24 has a critial vulnerability
+ * where -dSAFER could be escaped from.
+ */
+#define GS_MIN_VERSION (924)
 
 #define BUFFER_SIZE 32768
 
@@ -54,13 +48,13 @@ critic_error_code (int code)
 	
 	if (code <= -100) {
 		switch (code) {
-			case e_Fatal:
-				fprintf (stderr, "fatal internal error %d", code);
+			case gs_error_Fatal:
+				fprintf (stderr, "(libspectre) ghostscript reports: fatal internal error %d", code);
 				return TRUE;
 				break;
 
-			case e_ExecStackUnderflow:
-				fprintf (stderr, "stack overflow %d", code);
+			case gs_error_ExecStackUnderflow:
+				fprintf (stderr, "(libspectre) ghostscript reports: stack overflow %d", code);
 				return TRUE;
 				break;
 
@@ -73,7 +67,7 @@ critic_error_code (int code)
 		int x = (-1) * code;
 
 		if (x < (int) (sizeof (errors) / sizeof (const char*))) {
-			fprintf (stderr, "%s %d\n", errors[x], code);
+			fprintf (stderr, "(libspectre) ghostscript reports: %s %d\n", errors[x], code);
 		}
 		return TRUE;
 	}
@@ -120,9 +114,9 @@ spectre_gs_process (SpectreGS  *gs,
 		set = _spectre_strdup_printf ("%d %d translate\n", -x, -y);
 		error = gsapi_run_string_continue (ghostscript_instance, set, strlen (set),
 						   0, &exit_code);
-		error = error == e_NeedInput ? 0 : error;
+		error = error == gs_error_NeedInput ? 0 : error;
 		free (set);
-		if (error != e_NeedInput && critic_error_code (error)) {
+		if (error != gs_error_NeedInput && critic_error_code (error)) {
 			fclose (fd);
 			return FALSE;
 		}
@@ -137,7 +131,7 @@ spectre_gs_process (SpectreGS  *gs,
 		read = fread (buf, sizeof (char), to_read, fd);
 		error = gsapi_run_string_continue (ghostscript_instance,
 						   buf, read, 0, &exit_code);
-		error = error == e_NeedInput ? 0 : error;
+		error = error == gs_error_NeedInput ? 0 : error;
 		left -= read;
 	}
 	
@@ -166,8 +160,13 @@ int
 spectre_gs_create_instance (SpectreGS *gs,
 			    void      *caller_handle)
 {
+        int version;
 	int error;
-	
+
+        version = spectre_gs_get_version ();
+        if (version < GS_MIN_VERSION)
+                return FALSE;
+
 	error = gsapi_new_instance (&gs->ghostscript_instance, caller_handle);
 	if (!critic_error_code (error)) {
 		gsapi_set_stdio (gs->ghostscript_instance,

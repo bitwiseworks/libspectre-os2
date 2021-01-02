@@ -284,13 +284,10 @@ spectre_device_render (SpectreDevice        *device,
 	char      *dsp_format, *dsp_handle;
 	char      *width_points = NULL;
 	char      *height_points = NULL;
-        long       gs_version;
 
 	gs = spectre_gs_new ();
 	if (!gs)
 		return SPECTRE_STATUS_NO_MEMORY;
-
-        gs_version = spectre_gs_get_version();
 
 	if (!spectre_gs_create_instance (gs, device)) {
 		spectre_gs_cleanup (gs, CLEANUP_DELETE_INSTANCE);
@@ -374,28 +371,31 @@ spectre_device_render (SpectreDevice        *device,
 	free (dsp_handle);
 	free (args);
 	if (!success) {
+		free (device->user_image);
 		spectre_gs_free (gs);
 		return SPECTRE_STATUS_RENDER_ERROR;
 	}
 
 	set = _spectre_strdup_printf ("<< /Orientation %d >> setpagedevice .locksafe",
-				      gs_version >= 908 ? SPECTRE_ORIENTATION_PORTRAIT : rc->orientation);
+				      SPECTRE_ORIENTATION_PORTRAIT);
 	if (!spectre_gs_send_string (gs, set)) {
 		free (set);
+		free (device->user_image);
 		spectre_gs_free (gs);
 		return SPECTRE_STATUS_RENDER_ERROR;
 	}
 	free (set);
 
 	if (!spectre_gs_send_page (gs, device->doc, page, x, y)) {
+		free (device->user_image);
 		spectre_gs_free (gs);
 		return SPECTRE_STATUS_RENDER_ERROR;
 	}
 
 	*page_data = device->user_image;
 	*row_length = device->row_length;
-        if (gs_version >= 908)
-                rotate_image_to_orientation (page_data, row_length, width, height, rc->orientation);
+
+        rotate_image_to_orientation (page_data, row_length, width, height, rc->orientation);
 
 	spectre_gs_free (gs);
 

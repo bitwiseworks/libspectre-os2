@@ -2,7 +2,7 @@ AC_PREREQ(2.59)
 
 m4_define([spectre_major_version], [0])
 m4_define([spectre_minor_version], [2])
-m4_define([spectre_micro_version], [8])
+m4_define([spectre_micro_version], [9])
 m4_define([spectre_version],
           [spectre_major_version.spectre_minor_version.spectre_micro_version])
 
@@ -25,7 +25,7 @@ LT_CURRENT=2
 
 ## increment any time the source changes; set to
 ##  0 if you increment CURRENT
-LT_REVISION=8
+LT_REVISION=9
 
 ## increment if any interfaces have been added; set to 0
 ## if any interfaces have been changed or removed. removal has
@@ -63,7 +63,7 @@ AC_CHECK_FUNC(vasprintf, [ AC_DEFINE(HAVE_VASPRINTF, 1, [Define if the 'vasprint
 
 AC_CHECK_FUNC(_vscprintf, [ AC_DEFINE(HAVE__VSCPRINTF, 1, [Define if the '_vscprintf' function is available.]) ])
 
-LIBGS_REQUIRED="8.62"
+LIBGS_REQUIRED="9.24"
 
 AC_CHECK_LIB(gs, gsapi_new_instance, have_libgs=yes, have_libgs=no)
 if test "x$have_libgs" = "xyes"; then
@@ -291,6 +291,39 @@ AC_LANG_POP(C)
 if test "x$spectre_cv_va_val_copy" = "xno"; then
   AC_DEFINE(SPECTRE_VA_COPY_AS_ARRAY,1, ['va_lists' cannot be copies as values])
 fi
+
+dnl Check for -fvisibility=hidden to determine if we can do GNU-style
+dnl visibility attributes for symbol export control
+dnl
+VISIBILITY_CFLAGS=""
+case "$host" in
+  *-*-mingw*)
+    dnl on mingw32 we do -fvisibility=hidden and __declspec(dllexport)
+    AC_DEFINE([SPECTRE_PUBLIC], [__attribute__((visibility("default"))) __declspec(dllexport) extern],
+              [defines how to decorate public symbols while building])
+    CFLAGS="${CFLAGS} -fvisibility=hidden"
+    ;;
+  *)
+    dnl on other compilers, check if we can do -fvisibility=hidden
+    SAVED_CFLAGS="${CFLAGS}"
+    CFLAGS="-fvisibility=hidden"
+    AC_MSG_CHECKING([for -fvisibility=hidden compiler flag])
+    AC_TRY_COMPILE([], [return 0],
+                   AC_MSG_RESULT(yes)
+                   enable_fvisibility_hidden=yes,
+                   AC_MSG_RESULT(no)
+                   enable_fvisibility_hidden=no)
+    CFLAGS="${SAVED_CFLAGS}"
+
+    AS_IF([test "${enable_fvisibility_hidden}" = "yes"], [
+      AC_DEFINE([SPECTRE_PUBLIC], [__attribute__((visibility("default"))) extern],
+                [defines how to decorate public symbols while building])
+      VISIBILITY_CFLAGS="-fvisibility=hidden"
+    ],
+    [AC_DEFINE([SPECTRE_PUBLIC],[extern])])
+    ;;
+esac
+AC_SUBST([VISIBILITY_CFLAGS])
 
 AC_OUTPUT([
 Makefile
